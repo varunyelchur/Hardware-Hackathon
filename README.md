@@ -25,7 +25,7 @@ Live UI + Logs + Metrics
 
 Main Files
 	•	app.py → Streamlit dashboard (frontend + serial parser)
-	•	knocklock.ino (or sketch_mar28a.ino) → Arduino logic (sensors + decision engine)
+	•	sketch_mar28a.ino → Arduino logic (sensors + decision engine)
 
 ⸻
 
@@ -50,7 +50,7 @@ pip install streamlit pyserial
 
 2. Upload Arduino Code
 	1.	Open Arduino IDE
-	2.	Open knocklock.ino (or main .ino file)
+	2.	Open .ino file
 	3.	Select:
 	•	Board: Arduino Uno
 	•	Port: /dev/cu.usbmodemXXX (Mac) or COM port (Windows)
