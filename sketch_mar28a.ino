@@ -1,45 +1,17 @@
 #include <Servo.h>
-const int shock_pin = 2;
+const int touch_pin = 2;
 const int servo_pin = 4;
 const int level_pin = 7;
+const bool touch_active_high = true;
 Servo lock_servo;
-const unsigned long merge_gap_ms = 110;
-const unsigned long restart_gap_ms = 1200;
-const unsigned long short_gap_min = 140;
-const unsigned long short_gap_max = 380;
-const unsigned long long_gap_min = 300;
-const unsigned long long_gap_max = 900;
-unsigned long last_knock_time = 0;
-unsigned long last_trigger_time = 0;
-int last_shock_state = HIGH;
+const unsigned long touch_debounce_ms = 180;
+const unsigned long restart_gap_ms = 1800;
+unsigned long last_touch_time = 0;
+unsigned long last_event_time = 0;
+int last_touch_state = LOW;
 int last_level_state = HIGH;
 unsigned long intervals[3];
 int interval_count = 0;
-bool is_short_gap(unsigned long gap) {
-	return gap >= short_gap_min && gap <= short_gap_max;
-}
-bool is_long_gap(unsigned long gap) {
-	return gap >= long_gap_min && gap <= long_gap_max;
-}
-bool matches_pattern(unsigned long g1, unsigned long g2, unsigned long g3) {
-	bool in_range = is_long_gap(g1) && is_short_gap(g2) && is_long_gap(g3);
-	bool relative_shape = g2 < g1 && g2 < g3;
-	bool separation = g1 > g2 + 80 && g3 > g2 + 80;
-	return in_range && relative_shape && separation;
-}
-void reset_pattern() {
-	interval_count = 0;
-}
-void push_interval(unsigned long gap) {
-	if (interval_count < 3) {
-		intervals[interval_count] = gap;
-		interval_count++;
-	} else {
-		intervals[0] = intervals[1];
-		intervals[1] = intervals[2];
-		intervals[2] = gap;
-	}
-}
 int tilt_value_from_level_state(int level_state) {
 	return level_state == LOW ? 1 : 0;
 }
@@ -53,7 +25,7 @@ void emit_tilt_change(int level_state) {
 	Serial.print("TILT:");
 	Serial.println(tilt);
 }
-void emit_knock_detected() {
+void emit_touch_detected() {
 	Serial.println("KNOCK:DETECTED");
 }
 void emit_pattern_ok(int level_state) {
@@ -71,35 +43,63 @@ void emit_locked(int level_state) {
 	Serial.print("STATUS:LOCKED,TILT:");
 	Serial.println(tilt);
 }
+void reset_pattern() {
+	interval_count = 0;
+}
+void push_interval(unsigned long gap) {
+	if (interval_count < 3) {
+		intervals[interval_count] = gap;
+		interval_count++;
+	} else {
+		intervals[0] = intervals[1];
+		intervals[1] = intervals[2];
+		intervals[2] = gap;
+	}
+}
+bool matches_pattern(unsigned long g1, unsigned long g2, unsigned long g3) {
+	bool middle_shortest = g2 < g1 && g2 < g3;
+	bool strong_difference = g1 > g2 + 80 && g3 > g2 + 80;
+	bool similar_outer = abs((long)g1 - (long)g3) < 220;
+	return middle_shortest && strong_difference && similar_outer;
+}
 void unlock_box() {
 	lock_servo.write(90);
 	delay(3000);
 	lock_servo.write(0);
 	emit_locked(digitalRead(level_pin));
 }
+bool touch_detected(int previous_state, int current_state) {
+	if (touch_active_high) {
+		return previous_state == LOW && current_state == HIGH;
+	}
+	return previous_state == HIGH && current_state == LOW;
+}
 void setup() {
 	Serial.begin(9600);
-	pinMode(shock_pin, INPUT);
+	pinMode(touch_pin, INPUT);
 	pinMode(level_pin, INPUT);
 	lock_servo.attach(servo_pin);
 	lock_servo.write(0);
+	last_touch_state = digitalRead(touch_pin);
 	last_level_state = digitalRead(level_pin);
 	emit_startup_state();
 }
 void loop() {
 	unsigned long now = millis();
-	int current_shock_state = digitalRead(shock_pin);
+	int current_touch_state = digitalRead(touch_pin);
 	int current_level_state = digitalRead(level_pin);
 	if (current_level_state != last_level_state) {
 		emit_tilt_change(current_level_state);
 		last_level_state = current_level_state;
 	}
-	if (last_shock_state == HIGH && current_shock_state == LOW) {
-		if (last_trigger_time == 0 || now - last_trigger_time >= merge_gap_ms) {
-			last_trigger_time = now;
-			emit_knock_detected();
-			if (last_knock_time != 0) {
-				unsigned long gap = now - last_knock_time;
+	if (touch_detected(last_touch_state, current_touch_state)) {
+		if (last_event_time == 0 || now - last_event_time >= touch_debounce_ms) {
+			last_event_time = now;
+			emit_touch_detected();
+			if (last_touch_time != 0) {
+				unsigned long gap = now - last_touch_time;
+				Serial.print("INTERVAL:");
+				Serial.println(gap);
 				if (gap > restart_gap_ms) {
 					reset_pattern();
 				} else {
@@ -115,8 +115,8 @@ void loop() {
 					}
 				}
 			}
-			last_knock_time = now;
+			last_touch_time = now;
 		}
 	}
-	last_shock_state = current_shock_state;
+	last_touch_state = current_touch_state;
 }
